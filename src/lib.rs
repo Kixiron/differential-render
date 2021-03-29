@@ -1,0 +1,223 @@
+#![recursion_limit = "256"]
+
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+mod data;
+mod timeline;
+
+use crate::{
+    data::{ProfilingData, WorkerTimelineEvent},
+    timeline::Timeline,
+};
+use anyhow::{Context, Error, Result};
+use std::{cmp::Ordering, rc::Rc};
+use tracing::Level;
+use tracing_wasm::WASMLayerConfigBuilder;
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use web_sys::File;
+use yew::{
+    events::ChangeData,
+    html,
+    services::{
+        reader::{FileData, ReaderTask},
+        storage::Area,
+        ReaderService, StorageService,
+    },
+    Component, ComponentLink, Html, ShouldRender,
+};
+
+const LAST_FILE_KEY: &str = "differential-dashboard.last-opened-file";
+const NS_TO_MS: f64 = 1_000_000.0; // ns->sec = 1_000_000_000.0;
+
+#[wasm_bindgen]
+pub fn run_app() -> Result<(), JsValue> {
+    tracing_wasm::set_as_global_default_with_config(
+        WASMLayerConfigBuilder::new()
+            .set_max_level(Level::DEBUG)
+            .build(),
+    );
+    yew::start_app::<Dashboard>();
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct Dashboard {
+    link: ComponentLink<Self>,
+    file_task: Option<(ReaderTask, File)>,
+    events: Rc<[WorkerTimelineEvent]>,
+    alerts: Vec<Alert>,
+    storage: Option<StorageService>,
+}
+
+impl Dashboard {
+    fn dispatch(&mut self, message: Message) -> ShouldRender {
+        match message {
+            Message::LoadFile { file } => {
+                if let Some((_, file)) = self.file_task.as_ref() {
+                    self.alerts
+                        .push(Alert::LoadFileCanceled { file: file.clone() })
+                }
+
+                match self.load_file(file.clone()) {
+                    Ok(task) => {
+                        self.file_task = Some((task, file));
+                        false
+                    }
+
+                    Err(error) => {
+                        self.alerts.push(Alert::FailedFetch { file, error });
+                        true
+                    }
+                }
+            }
+
+            Message::FileReady { data } => {
+                // Discard the task once it's completed
+                let _ = self.file_task.take();
+
+                match data {
+                    Ok(mut data) => {
+                        tracing::info!("loaded file data");
+                        data.timeline_events
+                            .sort_unstable_by_key(|event| event.event.clone());
+
+                        self.events = Rc::from(data.timeline_events);
+                        true
+                    }
+
+                    Err(error) => {
+                        self.alerts.push(Alert::generic(error));
+                        true
+                    }
+                }
+            }
+        }
+    }
+
+    fn load_file(&mut self, file: File) -> Result<ReaderTask> {
+        let callback = self.link.callback(move |file_data: FileData| {
+            let data = serde_json::from_slice(&file_data.content).map_err(Into::into);
+            tracing::debug!("Loaded file {:?}\nContent: {:?}", file_data.name, data);
+
+            Message::FileReady { data }
+        });
+
+        ReaderService::new()
+            .read_file(file.clone(), callback)
+            .with_context(|| format!("failed fetching file {}", file.name()))
+    }
+}
+
+impl Component for Dashboard {
+    type Message = Message;
+    type Properties = ();
+
+    fn create(_properties: Self::Properties, link: ComponentLink<Self>) -> Self {
+        let storage = StorageService::new(Area::Local).ok();
+
+        if let Some(_file) = storage
+            .as_ref()
+            .and_then(|storage| storage.restore::<Result<String>>(LAST_FILE_KEY).ok())
+        {
+            // TODO: Load the most recently loaded file
+            // FetchService::fetch(Request::get(file), |response| {})
+        }
+
+        Self {
+            link,
+            file_task: None,
+            alerts: Vec::new(),
+            events: Rc::from(Vec::new()),
+            storage,
+        }
+    }
+
+    fn update(&mut self, message: Self::Message) -> ShouldRender {
+        self.dispatch(message)
+    }
+
+    fn change(&mut self, _properties: Self::Properties) -> ShouldRender {
+        todo!()
+    }
+
+    fn view(&self) -> Html {
+        let duration = self
+            .events
+            .iter()
+            .map(|event| event.end_time() as f64 / NS_TO_MS)
+            .max_by(|x, y| x.partial_cmp(y).unwrap_or(Ordering::Less))
+            .unwrap_or(0.0);
+
+        html! {
+            <>
+                <div id="menu">
+                    <p>{ "Choose a file to visualize profile events for" }</p>
+                    <input type="file" multiple=false accept=".json,.json5" onchange=self.link.callback(move |change_data| {
+                            if let ChangeData::Files(files) = change_data {
+                                // TODO: Can the user give no files?
+                                debug_assert_eq!(files.length(), 1);
+
+                                Message::LoadFile { file: files.get(0).unwrap() }
+                            } else {
+                                unreachable!()
+                            }
+                        })
+                    />
+                </div>
+
+                { self.alerts.iter().map(Alert::render).collect::<Html>() }
+
+                <Timeline
+                    events=self.events.clone()
+                    duration=duration
+                    scale=50.0
+                />
+            </>
+        }
+    }
+
+    fn rendered(&mut self, _is_first_render: bool) {
+        self.alerts.clear();
+    }
+}
+
+#[derive(Debug)]
+enum Alert {
+    LoadFileCanceled { file: File },
+    FailedFetch { file: File, error: Error },
+    Generic(String),
+}
+
+impl Alert {
+    fn generic<T>(error: T) -> Self
+    where
+        T: ToString,
+    {
+        Self::Generic(error.to_string())
+    }
+
+    // TODO: Make this a full-blown component with modal popups
+    fn render(&self) -> Html {
+        let content = match self {
+            Self::LoadFileCanceled { file } => format!("Canceled loading {}", file.name()),
+            Self::FailedFetch { file, error } => {
+                format!("Failed to load {}: {}", file.name(), error)
+            }
+            Self::Generic(message) => message.clone(),
+        };
+
+        html! {
+            <div class="alert-popup">
+                { content }
+            </div>
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Message {
+    LoadFile { file: File },
+    FileReady { data: Result<ProfilingData> },
+}

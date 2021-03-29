@@ -1,0 +1,3 @@
+[submodule "crates/gigatrace"]
+	path = crates/gigatrace
+	url = git@github.com:trishume/gigatrace.git

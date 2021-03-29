@@ -1,0 +1,6 @@
+/target
+/.vscode
+/node_modules
+/dist
+/pkg
+/wasm-pack.log

@@ -1,0 +1,58 @@
+[package]
+name = "differential-dashboard"
+version = "0.1.0"
+authors = ["Chase Wilson <me@chasewilson.dev>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = "1.0.125"
+anyhow = "1.0.39"
+humantime = "2.1.0"
+wee_alloc = "0.4.5"
+serde_json = "1.0.64"
+tracing-wasm = "0.2.0"
+differential-dataflow = "0.12.0"
+console_error_panic_hook = "0.1.5"
+
+[dependencies.gigatrace]
+path = "crates/gigatrace"
+
+[dependencies.tracing]
+version = "0.1.25"
+features = ["release_max_level_off"]
+
+[dependencies.wasm-bindgen]
+version = "0.2.72"
+features = ["serde-serialize"]
+
+[dependencies.yew]
+version = "0.17.4"
+default-features = false
+features = ["web_sys", "services", "agent"]
+
+[dependencies.timely]
+version = "0.12.0"
+default-features = false
+
+[dependencies.web-sys]
+version = "0.3.49"
+features = [
+    "CanvasRenderingContext2d",
+    "HtmlCanvasElement",
+    "CssStyleDeclaration",
+    "HtmlDivElement",
+    "TextMetrics",
+    "DomRect",
+    "Element",
+]
+
+[profile.release]
+lto = "fat"
+debug = 0
+panic = "abort"
+opt-level = "z"
+codegen-units = 1

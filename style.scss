@@ -1,0 +1,27 @@
+$background: #f5f5f5;
+
+body {
+    font-family: "Roboto", "Helvetica Neue", sans-serif;
+    background: $background;
+}
+
+#timeline {
+    position: relative;
+    margin-top: 20px;
+
+    .canvas-layer {
+        position: absolute;
+        left: 0;
+        top: 0;
+    }
+
+    #timeline-canvas {
+        z-index: 0;
+    }
+
+    #timeline-overlay-canvas {
+        pointer-events: none;
+        // Make the overlay appear above the timeline
+        z-index: 1;
+    }
+}
