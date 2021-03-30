@@ -1,14 +1,11 @@
 #![recursion_limit = "256"]
 
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 mod data;
 mod timeline;
 
 use crate::{
     data::{ProfilingData, WorkerTimelineEvent},
-    timeline::Timeline,
+    timeline::{constants::NS_TO_MS, Timeline},
 };
 use anyhow::{Context, Error, Result};
 use std::{cmp::Ordering, rc::Rc};
@@ -27,8 +24,10 @@ use yew::{
     Component, ComponentLink, Html, ShouldRender,
 };
 
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 const LAST_FILE_KEY: &str = "differential-dashboard.last-opened-file";
-const NS_TO_MS: f64 = 1_000_000.0; // ns->sec = 1_000_000_000.0;
 
 #[wasm_bindgen]
 pub fn run_app() -> Result<(), JsValue> {
@@ -37,6 +36,7 @@ pub fn run_app() -> Result<(), JsValue> {
             .set_max_level(Level::DEBUG)
             .build(),
     );
+
     yew::start_app::<Dashboard>();
 
     Ok(())

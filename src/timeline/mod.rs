@@ -1,18 +1,24 @@
 mod canvas;
-mod constants;
+pub(crate) mod constants;
 mod properties;
 mod render;
 mod required_lines;
 mod utils;
 
 use crate::{
-    data::WorkerTimelineEvent,
+    data::{EventId, WorkerTimelineEvent},
     timeline::{
         canvas::Canvas, properties::TimelineProps, required_lines::RequiredLines,
         utils::calculate_timeline_dimensions,
     },
 };
-use std::{borrow::Cow, rc::Rc};
+use gigatrace::{
+    iforest::IForestIndex,
+    index::TrackIndex,
+    trace::{BlockPool, Nanos, PackedNanos, TraceEvent, Track},
+    Trace, TrackInfo,
+};
+use std::{borrow::Cow, collections::HashMap, ops::Range, rc::Rc};
 use wasm_bindgen::JsValue;
 use web_sys::{CanvasRenderingContext2d, MouseEvent};
 use yew::{html, Component, ComponentLink, Html, NodeRef, ShouldRender};
@@ -66,6 +72,10 @@ pub struct Timeline {
     hitboxes: Vec<Hitbox>,
     // TODO: Make this a struct
     current_hover: Option<(Hitbox, (i32, i32))>,
+
+    trace: Trace<EventId>,
+    view_range: Range<Nanos>,
+    event_map: HashMap<EventId, WorkerTimelineEvent>,
 }
 
 impl Timeline {
@@ -107,6 +117,10 @@ impl Component for Timeline {
         let window = web_sys::window().unwrap();
         let dpr = window.device_pixel_ratio();
 
+        let trace = build_trace(&*properties.events, &required_lines);
+        let view_range = trace.time_bounds().unwrap_or(0..1000);
+        let event_map = build_event_map(&*properties.events);
+
         Self {
             link,
             events: properties.events,
@@ -136,6 +150,10 @@ impl Component for Timeline {
 
             hitboxes: Vec::new(),
             current_hover: None,
+
+            trace,
+            view_range,
+            event_map,
         }
     }
 
@@ -180,6 +198,12 @@ impl Component for Timeline {
             required_lines,
         ) = calculate_timeline_dimensions(&properties);
 
+        // TODO: Buffer these
+        self.trace = build_trace(&*properties.events, &required_lines);
+        self.event_map = build_event_map(&*properties.events);
+        // TODO: Attempt to preserve view range?
+        self.view_range = self.trace.time_bounds().unwrap_or(0..1000);
+
         self.scale = scale;
         self.duration = duration;
         self.graph_width = graph_width;
@@ -189,6 +213,8 @@ impl Component for Timeline {
         self.canvas_height = canvas_height;
         self.required_lines = required_lines;
         self.events = properties.events;
+
+        tracing::info!(?self.trace);
 
         self.scale_timeline();
 
@@ -215,7 +241,7 @@ impl Component for Timeline {
         };
 
         html! {
-            <div id="timeline" ref=self.graph_div.clone() onmousemove=self.link.callback(Message::MouseMove)>
+            <div id="timeline" ref=self.graph_div.clone()> // onmousemove=self.link.callback(Message::MouseMove)
                 // TODO: Allow configuring the cutoff percent of events
                 // <input
                 //     type="range"
@@ -249,4 +275,42 @@ impl Component for Timeline {
         tracing::info!(is_first_render = is_first_render, "rendering timeline");
         self.scale_timeline();
     }
+}
+
+fn build_trace(events: &[WorkerTimelineEvent], required_lines: &RequiredLines) -> Trace<EventId> {
+    let mut pool = BlockPool::new();
+    let mut event_tracks: HashMap<_, _> = required_lines
+        .events()
+        .map(|event| (event, Track::new()))
+        .collect();
+
+    for event in events {
+        let track = event_tracks.get_mut(&event.event).unwrap();
+
+        track.push(
+            &mut pool,
+            TraceEvent {
+                kind: event.event_id,
+                timestamp: PackedNanos::new(event.start_time),
+                duration: PackedNanos::new(event.duration),
+            },
+        );
+    }
+
+    let mut tracks = Vec::with_capacity(event_tracks.len());
+    for (_event, track) in event_tracks {
+        let index = IForestIndex::build(&track, &pool);
+        tracks.push(TrackInfo::new(track, index));
+    }
+
+    let trace = Trace { pool, tracks };
+    tracing::debug!(trace = ?trace);
+    trace
+}
+
+fn build_event_map(events: &[WorkerTimelineEvent]) -> HashMap<EventId, WorkerTimelineEvent> {
+    events
+        .iter()
+        .map(|event| (event.event_id, event.clone()))
+        .collect()
 }

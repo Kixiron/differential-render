@@ -1,10 +1,12 @@
-use crate::NS_TO_MS;
+use crate::timeline::constants::{NS_MARGIN, NS_TO_MS};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     fmt::{self, Display},
 };
 use web_sys::CanvasRenderingContext2d;
+
+pub type EventId = u64;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct ProfilingData {
@@ -66,11 +68,9 @@ pub enum EdgeKind {
     Crossing,
 }
 
-const NS_MARGIN: u64 = 500_000;
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct WorkerTimelineEvent {
-    pub event_id: u64,
+    pub event_id: EventId,
     pub worker: usize,
     pub event: TimelineEvent,
     pub start_time: u64,
