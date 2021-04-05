@@ -44,7 +44,12 @@ impl Timeline {
         ctx.save();
         ctx.translate(X_LINE, MARGIN).unwrap();
 
-        tracing::debug!(?self.view_range);
+        tracing::debug!(
+            view_range = ?self.view_range,
+            quantized_range = ?quant.quantize(&self.view_range),
+            time_step = quant.time_step,
+            time_bounds = ?self.trace.time_bounds(),
+        );
 
         for (track_idx, track) in self.trace.tracks.iter().enumerate() {
             // TODO: Buffer this
@@ -55,11 +60,6 @@ impl Timeline {
                 quant.quantize(&self.view_range),
                 quant.time_step,
             );
-
-            // tracing::debug!(
-            //     visible_events = ?visible_events.iter().filter_map(|event| event.0).collect::<Vec<_>>(),
-            //     track_idx = track_idx,
-            // );
 
             for event in visible_events.iter().filter_map(|event| event.0) {
                 let timestamp = event.timestamp.unpack();
