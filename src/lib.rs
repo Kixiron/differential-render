@@ -12,16 +12,16 @@ use std::{cmp::Ordering, rc::Rc};
 use tracing::Level;
 use tracing_wasm::WASMLayerConfigBuilder;
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
-use web_sys::File;
+use web_sys::{File, HtmlParagraphElement};
 use yew::{
-    events::ChangeData,
+    events::{ChangeData, InputData},
     html,
     services::{
         reader::{FileData, ReaderTask},
         storage::Area,
         ReaderService, StorageService,
     },
-    Component, ComponentLink, Html, ShouldRender,
+    Component, ComponentLink, Html, NodeRef, ShouldRender,
 };
 
 #[global_allocator]
@@ -49,6 +49,8 @@ struct Dashboard {
     events: Rc<[WorkerTimelineEvent]>,
     alerts: Vec<Alert>,
     storage: Option<StorageService>,
+    cutoff_display: NodeRef,
+    cutoff_value: u64,
 }
 
 impl Dashboard {
@@ -93,6 +95,17 @@ impl Dashboard {
                     }
                 }
             }
+
+            Message::ChangeCutoff(cutoff) => {
+                self.cutoff_value = cutoff;
+
+                if let Some(cutoff_display) = self.cutoff_display.cast::<HtmlParagraphElement>() {
+                    // TODO: Buffer this?
+                    cutoff_display.set_inner_text(&format!("Event time cutoff: {}ms", cutoff));
+                }
+
+                true
+            }
         }
     }
 
@@ -131,6 +144,8 @@ impl Component for Dashboard {
             alerts: Vec::new(),
             events: Rc::from(Vec::new()),
             storage,
+            cutoff_display: NodeRef::default(),
+            cutoff_value: 0,
         }
     }
 
@@ -165,6 +180,12 @@ impl Component for Dashboard {
                             }
                         })
                     />
+
+                    <p ref=self.cutoff_display.clone()>{ format!("Event time cutoff: {}ms", self.cutoff_value) }</p>
+                    <input type="range" min="0" max="10000" step="1" value={ self.cutoff_value } oninput=self.link.callback(move |input_data: InputData| {
+                            Message::ChangeCutoff(input_data.value.parse().unwrap())
+                        })
+                    />
                 </div>
 
                 { self.alerts.iter().map(Alert::render).collect::<Html>() }
@@ -173,6 +194,7 @@ impl Component for Dashboard {
                     events=self.events.clone()
                     duration=duration
                     scale=50.0
+                    event_cutoff=self.cutoff_value
                 />
             </>
         }
@@ -220,4 +242,5 @@ impl Alert {
 pub enum Message {
     LoadFile { file: File },
     FileReady { data: Result<ProfilingData> },
+    ChangeCutoff(u64),
 }

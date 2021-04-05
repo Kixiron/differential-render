@@ -8,7 +8,7 @@ use crate::{
 };
 use gigatrace::trace::Nanos;
 use humantime::Duration as HumanDuration;
-use std::{f64::consts::PI, ops::Range, time::Duration};
+use std::{convert::identity, f64::consts::PI, ops::Range, time::Duration};
 use web_sys::{CanvasRenderingContext2d, HtmlDivElement};
 
 impl Timeline {
@@ -37,8 +37,9 @@ impl Timeline {
 
         // Draw the graph's y axis
         let max_idx = self.required_lines.required_lines().saturating_sub(1);
-        for (idx, event_kind) in self.required_lines.events().enumerate() {
-            self.draw_y_line(&event_kind, idx, max_idx, ctx);
+        for event in self.required_lines.events() {
+            let idx = self.sorted_events.iter().position(|x| x == event).unwrap();
+            self.draw_y_line(event, idx, max_idx, ctx);
         }
 
         ctx.save();
@@ -51,7 +52,7 @@ impl Timeline {
             time_bounds = ?self.trace.time_bounds(),
         );
 
-        for (track_idx, track) in self.trace.tracks.iter().enumerate() {
+        for track in self.trace.tracks.iter() {
             // TODO: Buffer this
             let visible_events = gigatrace::aggregate_by_steps(
                 &self.trace.pool,
@@ -59,9 +60,22 @@ impl Timeline {
                 &track.zoom_index,
                 quant.quantize(&self.view_range),
                 quant.time_step,
+                |event| {
+                    event
+                        .0
+                        .map(|event| event.duration.unpack() >= self.event_cutoff)
+                        .unwrap_or_default()
+                },
             );
 
             for event in visible_events.iter().filter_map(|event| event.0) {
+                let timeline_event = self.event_map.get(&event.kind).unwrap();
+                let track_idx = self
+                    .sorted_events
+                    .iter()
+                    .position(|x| x == &timeline_event.event)
+                    .unwrap();
+
                 let timestamp = event.timestamp.unpack();
                 let duration = event.duration.unpack();
 
@@ -96,7 +110,6 @@ impl Timeline {
                 ctx.fill_text(&label, label_x, y + height / 2.0 - 5.0)
                     .unwrap();
 
-                let timeline_event = self.event_map.get(&event.kind).unwrap();
                 self.hitboxes.push(Hitbox {
                     x: start + X_LINE,
                     y: y + MARGIN,

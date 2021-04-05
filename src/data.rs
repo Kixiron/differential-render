@@ -1,10 +1,13 @@
-use crate::timeline::constants::{NS_MARGIN, NS_TO_MS};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
+    convert::TryInto,
     fmt::{self, Display},
 };
-use web_sys::CanvasRenderingContext2d;
+
+pub const NS_MARGIN: u64 = 500_000;
+
+pub const NS_TO_MS: f64 = 1_000_000.0; // ns->sec = 1_000_000_000.0;
 
 pub type EventId = u64;
 
@@ -111,6 +114,7 @@ impl WorkerTimelineEvent {
         }
     }
 
+    /*
     pub fn text_overlap(&self, other: &Self, ctx: &CanvasRenderingContext2d) -> Ordering {
         let label = self.event.to_string();
         let other_label = other.event.to_string();
@@ -134,10 +138,10 @@ impl WorkerTimelineEvent {
         } else {
             unreachable!()
         }
-    }
+    }*/
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TimelineEvent {
     OperatorActivation {
         operator_id: usize,
@@ -154,18 +158,56 @@ pub enum TimelineEvent {
     Parked,
 }
 
+impl TimelineEvent {
+    fn rank(&self) -> u128 {
+        let mut bytes = 0u128.to_ne_bytes();
+
+        let [first, second] = match self {
+            &Self::OperatorActivation { operator_id, .. } => [operator_id as u64, 6],
+            &Self::Merge { operator_id, .. } => [operator_id as u64, 5],
+            Self::Progress => [0, 4],
+            Self::Message => [0, 3],
+            Self::Application => [0, 2],
+            Self::Input => [0, 1],
+            Self::Parked => [0, 0],
+        };
+
+        bytes[..8].copy_from_slice(&first.to_le_bytes());
+        bytes[8..].copy_from_slice(&second.to_le_bytes());
+        u128::from_le_bytes(bytes)
+    }
+}
+
+impl PartialOrd for TimelineEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.rank().partial_cmp(&other.rank())
+    }
+}
+
+impl Ord for TimelineEvent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.rank().cmp(&other.rank())
+    }
+}
+
 impl Display for TimelineEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::OperatorActivation { operator_name, .. } => {
-                write!(f, "Operator: {}", operator_name)
+            Self::OperatorActivation {
+                operator_id,
+                operator_name,
+            } => {
+                write!(f, "Operator {}: {}", operator_id, operator_name)
             }
             Self::Application => f.write_str("Application"),
             Self::Parked => f.write_str("Parked"),
             Self::Input => f.write_str("Input"),
             Self::Message => f.write_str("Message"),
             Self::Progress => f.write_str("Progress"),
-            Self::Merge { operator_name, .. } => write!(f, "Merge: {}", operator_name),
+            Self::Merge {
+                operator_id,
+                operator_name,
+            } => write!(f, "Merge {}: {}", operator_id, operator_name),
         }
     }
 }

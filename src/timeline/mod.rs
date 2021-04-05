@@ -6,7 +6,7 @@ mod required_lines;
 mod utils;
 
 use crate::{
-    data::{EventId, WorkerTimelineEvent},
+    data::{EventId, TimelineEvent, WorkerTimelineEvent},
     timeline::{
         canvas::Canvas, properties::TimelineProps, required_lines::RequiredLines,
         utils::calculate_timeline_dimensions,
@@ -18,7 +18,7 @@ use gigatrace::{
     trace::{BlockPool, Nanos, PackedNanos, TraceEvent, Track},
     Trace, TrackInfo,
 };
-use std::{borrow::Cow, collections::HashMap, ops::Range, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 use wasm_bindgen::JsValue;
 use web_sys::{CanvasRenderingContext2d, MouseEvent};
 use yew::{html, Component, ComponentLink, Html, NodeRef, ShouldRender};
@@ -76,6 +76,8 @@ pub struct Timeline {
     trace: Trace<EventId>,
     view_range: Range<Nanos>,
     event_map: HashMap<EventId, WorkerTimelineEvent>,
+    event_cutoff: Nanos,
+    sorted_events: Vec<TimelineEvent>,
 }
 
 impl Timeline {
@@ -121,6 +123,15 @@ impl Component for Timeline {
         let view_range = trace.time_bounds().unwrap_or(0..1000);
         let event_map = build_event_map(&*properties.events);
 
+        let mut sorted_events: Vec<_> = properties
+            .events
+            .iter()
+            .map(|event| event.event.clone())
+            .collect();
+        sorted_events.sort_unstable();
+        sorted_events.dedup();
+        sorted_events.reverse();
+
         Self {
             link,
             events: properties.events,
@@ -154,6 +165,8 @@ impl Component for Timeline {
             trace,
             view_range,
             event_map,
+            event_cutoff: Duration::from_millis(properties.event_cutoff).as_nanos() as Nanos,
+            sorted_events,
         }
     }
 
@@ -204,6 +217,17 @@ impl Component for Timeline {
         // TODO: Attempt to preserve view range?
         self.view_range = self.trace.time_bounds().unwrap_or(0..1000);
 
+        let mut sorted_events: Vec<_> = properties
+            .events
+            .iter()
+            .map(|event| event.event.clone())
+            .collect();
+        sorted_events.sort_unstable();
+        sorted_events.dedup();
+        sorted_events.reverse();
+
+        self.sorted_events = sorted_events;
+
         self.scale = scale;
         self.duration = duration;
         self.graph_width = graph_width;
@@ -213,6 +237,7 @@ impl Component for Timeline {
         self.canvas_height = canvas_height;
         self.required_lines = required_lines;
         self.events = properties.events;
+        self.event_cutoff = Duration::from_millis(properties.event_cutoff).as_nanos() as Nanos;
 
         tracing::info!(?self.trace);
 
@@ -296,6 +321,9 @@ fn build_trace(events: &[WorkerTimelineEvent], required_lines: &RequiredLines) -
             },
         );
     }
+
+    let mut event_tracks = event_tracks.into_iter().collect::<Vec<_>>();
+    event_tracks.sort_unstable_by_key(|&(idx, _)| idx);
 
     let mut tracks = Vec::with_capacity(event_tracks.len());
     for (_event, track) in event_tracks {

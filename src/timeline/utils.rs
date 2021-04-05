@@ -16,6 +16,7 @@ pub(super) fn draw_rounded_rect(
     height: f64,
     radius: f64,
 ) -> Result<(), JsValue> {
+    tracing::trace!(%width, %radius, %height);
     let radius = radius.min(width).min(height);
 
     ctx.begin_path();

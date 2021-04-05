@@ -5,7 +5,7 @@ type MultiSet<K, V> = HashMap<K, V>;
 
 #[derive(Debug, Clone)]
 pub(super) struct RequiredLines {
-    unique_events: MultiSet<TimelineEvent, u32>,
+    pub(crate) unique_events: MultiSet<TimelineEvent, u32>,
 }
 
 impl RequiredLines {
