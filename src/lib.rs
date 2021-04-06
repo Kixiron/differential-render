@@ -1,5 +1,14 @@
 #![recursion_limit = "256"]
 
+// TODO: God this needs a refactor so bad, just every bit of it
+// TODO: We need to take advantage of incrementality here so that
+//       we can handle realtime streaming data at 60fps
+// TODO: Nothing here is really tied to WASM at all, maybe look
+//       into a UI lib that allows being abstracted from the renderer
+//       and takes care of platform woes so that we can have a web &
+//       native client, druid looks promising and pretty similar to
+//       the yew setup, so that could be reasonably easy to port to
+
 mod data;
 mod timeline;
 
